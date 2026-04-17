@@ -80,6 +80,8 @@ Flujo resumido:
 
 **transformers**, **tokenizers**, etc. La primera ejecución descarga el modelo de embeddings (`semantic_router.encoder.name`, por defecto `sentence-transformers/all-MiniLM-L6-v2`).
 
+**llama-cpp-python** (traído por `semantic-router[local]`): si pip no encuentra un wheel precompilado para tu versión de Python y Windows, intentará **compilar** el paquete; en ese caso hacen falta las herramientas C++ del apartado siguiente.
+
 ### Requisitos del sistema (Windows + CUDA)
 
 - **Windows 10/11** (64 bits).
@@ -87,10 +89,11 @@ Flujo resumido:
 - **GPU NVIDIA** con drivers recientes; comprobar con `nvidia-smi` en PowerShell.
 - **CUDA 12.x** compatible con el wheel usado: el repo apunta a **CUDA 12.4** (`cu124`) en el índice de PyTorch. Si tu driver/stack usa otra variante, cambia la línea `--extra-index-url` en `requirements.txt` según la [matriz oficial de PyTorch](https://pytorch.org/get-started/locally/).
 - **[Ollama para Windows](https://ollama.com/download)** con el modelo de `router_model.name`. Ollama usa la GPU NVIDIA automáticamente cuando los drivers lo permiten (comprueba con `nvidia-smi` mientras generas texto).
+- **Compilación C++ (recomendado para `pip install`):** instala [Build Tools para Visual Studio](https://visualstudio.microsoft.com/es/visual-cpp-build-tools/) (o Visual Studio completo) con la carga de trabajo **Desarrollo de escritorio con C++** (MSVC, Windows SDK, entorno para `nmake`). Así evitas errores del tipo *`nmake` no encontrado* o *`CMAKE_C_COMPILER not set`* al construir **llama-cpp-python**. Tras instalarlo, ejecuta la instalación de dependencias desde **PowerShell para desarrolladores de VS** o **Símbolo del sistema de herramientas nativas x64**, o asegúrate de que el PATH incluya el kit de compilación, para que CMake encuentre el compilador.
 
 ## Instalación (Windows + NVIDIA CUDA)
 
-1. Clonar o copiar el repositorio y abrir **PowerShell** en la raíz del proyecto.
+1. Clonar o copiar el repositorio y abrir **PowerShell** en la raíz del proyecto (si compilaste dependencias nativas, usa **PowerShell para desarrolladores** según el requisito anterior).
 
 2. Instalación asistida (recomendado): crea `.venv`, instala dependencias y verifica `torch.cuda.is_available()`:
 
