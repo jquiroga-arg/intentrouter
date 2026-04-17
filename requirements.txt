@@ -1,0 +1,7 @@
+# Windows + NVIDIA CUDA: PyTorch con wheels CUDA 12.4 (ajusta la URL si usas otra
+# variante según https://pytorch.org/get-started/locally/ ).
+--extra-index-url https://download.pytorch.org/whl/cu124
+torch>=2.3.0,<2.8.0
+semantic-router[local]>=0.1.0
+ollama>=0.4.0
+requests>=2.28.0

@@ -1,0 +1,29 @@
+{
+  "branch": "main",
+  "environment": "windows-cuda",
+  "intents_csv": "Test/intents.csv",
+  "ollama": {
+    "host": "http://127.0.0.1:11434",
+    "pull_on_startup": true,
+    "chat_timeout_seconds": 120
+  },
+  "router_model": {
+    "name": "qwen3.5:9b",
+    "temperature": 0.3,
+    "max_tokens": 512
+  },
+  "semantic_router": {
+    "encoder": {
+      "name": "sentence-transformers/all-MiniLM-L6-v2",
+      "device": "cuda",
+      "score_threshold": 0.5
+    },
+    "auto_sync": "local",
+    "top_k": 5,
+    "aggregation": "mean"
+  },
+  "chat": {
+    "system_prompt": "Eres un asistente virtual de un municipio. La intención detectada por el clasificador es: {route_name}. Responde en español, de forma breve y útil. Si la intención es null o INEXISTENTE, indica con cortesía que no puedes ayudar con ese tema municipal.",
+    "exit_commands": ["salir", "exit", "quit", "q"]
+  }
+}
