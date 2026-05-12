@@ -15,11 +15,13 @@ flowchart TB
     subgraph app["ruteador_semantico"]
         CFG[config.json / RUTEADOR_CONFIG]
         CSV[Test/intents.csv]
+        PROMPT["Prompts/router.txt\n(clasificador LLM)"]
         LD[routes_csv.py]
         MAIN[main.py]
         CFG --> MAIN
         CSV --> LD
         LD -->|Route por categoría| MAIN
+        PROMPT -.->|"si llm_fallback=true"| MAIN
     end
 
     subgraph sr["semantic-router"]
@@ -32,23 +34,28 @@ flowchart TB
         LLM_WRAPPER --> SR
     end
 
-    subgraph ollama_svc["Ollama"]
-        API["/api/chat"]
+    subgraph ollama_svc["Ollama /api/chat  —  think:false"]
         MODEL["Modelo ej. qwen3.5:9b"]
-        API --> MODEL
     end
 
     U --> MAIN
     MAIN -->|utterance| SR
-    SR -->|RouteChoice.name| MAIN
-    MAIN -->|chat messages| API
+    SR -->|"RouteChoice.name"| MAIN
+    SR -. "null → fallback LLM" .-> MAIN
+    MAIN -->|"think:false + JSON Schema\n(clasificador)"| ollama_svc
+    MAIN -->|"think:false + system_prompt\n(respuesta)"| ollama_svc
+    ollama_svc -->|respuesta| MAIN
+    MAIN --> U
 ```
 
 Flujo resumido:
 
 1. Al iniciar, se lee `config.json`, se resuelve la ruta del CSV y se construyen objetos `Route` (una ruta por categoría, con todas las frases de ejemplo de esa categoría).
-2. **SemanticRouter** codifica las frases con el encoder y decide la intención por similitud semántica.
-3. El mismo modelo configurado en Ollama recibe un **system prompt** que incluye la intención detectada y responde al usuario en lenguaje natural.
+2. **SemanticRouter** codifica la consulta con el encoder y decide la intención por similitud semántica.
+3. Si ninguna ruta supera el umbral de similitud y `llm_fallback` está activo, se hace un segundo pase con `Prompts/router.txt` como system prompt y schema JSON estricto (`INTENT_JSON_SCHEMA`) para obtener la intención.
+4. El mismo modelo Ollama recibe un **system prompt** que incluye la intención detectada y responde al usuario en lenguaje natural.
+
+Todos los llamados a Ollama usan `"think": false` (HTTP, nivel raíz del payload) para suprimir los bloques `<think>…</think>` de Qwen3.5, y reintentan automáticamente con backoff exponencial ante fallas transitorias.
 
 ## Estructura del repositorio
 
@@ -56,14 +63,21 @@ Flujo resumido:
 |------|-------------|
 | `config.json` | Configuración por entorno (modelo, Ollama, CSV, prompts, **device CUDA** del encoder). |
 | `requirements.txt` | Dependencias Python; **PyTorch con wheels CUDA 12.4** para Windows + NVIDIA. |
+| `requirements-dev.txt` | Dependencias de desarrollo: `pytest`. |
 | `install-windows-cuda.ps1` | Script de PowerShell: venv + `pip install -r requirements.txt` + comprobación `torch.cuda`. |
+| `conftest.py` | Configuración raíz de pytest (agrega el proyecto al path). |
 | `ruteador_semantico/` | Código de la aplicación. |
-| `ruteador_semantico/main.py` | Arranque, impresión de rutas y bucle de chat. |
+| `ruteador_semantico/main.py` | Arranque, logging, bucle de chat, fallback LLM. |
 | `ruteador_semantico/routes_csv.py` | Generación de `Route` desde el CSV. |
-| `ruteador_semantico/ollama_llm.py` | LLM compatible con semantic-router y host configurable. |
+| `ruteador_semantico/ollama_llm.py` | LLM compatible con semantic-router, host configurable, retry y JSON Schema. |
 | `ruteador_semantico/load_config.py` | Carga de JSON y resolución de rutas relativas. |
 | `Test/intents.csv` | Dataset de ejemplo: `id,utterance,category` (sin fila de cabecera). |
-| `Doc/` | Notas de contexto (p. ej. `semanticRouter.md`). |
+| `Prompts/router.txt` | System prompt del clasificador LLM de fallback (9 categorías, `/no_think`, JSON Schema). |
+| `tests/` | Tests unitarios (pytest). |
+| `tests/test_routes_csv.py` | 13 casos: parsing CSV, BOM, acentos, CSV real de producción. |
+| `tests/test_load_config.py` | 12 casos: carga de config, BOM, `resolve_path`, variable de entorno. |
+| `tests/conftest.py` | Mock de `semantic_router`/`pydantic`/`ollama` para CI sin GPU ni dependencias pesadas. |
+| `Doc/` | Notas de contexto (análisis del prompt, comparativa de modelos, referencia de semantic-router). |
 
 ## Dependencias
 
@@ -73,8 +87,8 @@ Flujo resumido:
 |---------|-----|
 | `torch` (wheel **cu124**) | Backend GPU del encoder vía `--extra-index-url` de PyTorch; evita el wheel solo-CPU por defecto en PyPI. |
 | `semantic-router[local]` | Router semántico + encoder Hugging Face local (`transformers`, etc.). |
-| `ollama` | Cliente Python para hablar con el servidor Ollama (pull y chat). |
-| `requests` | Peticiones HTTP usadas por `ConfigurableOllamaLLM`. |
+| `ollama` | Cliente Python para el `pull` del modelo al arrancar. |
+| `requests` | Peticiones HTTP directas a `/api/chat` (clasificador y respuesta); permite pasar `think:false` al nivel raíz del payload. |
 
 ### Transitivas relevantes
 
@@ -129,7 +143,7 @@ Si necesitas ejecutar sin GPU, en `config.json` pon `"device": "cpu"` bajo `sema
 
 ## Configuración (`config.json`)
 
-Todas las variables que suelen cambiar entre entornos conviven en un solo archivo en la raíz. Las rutas relativas (p. ej. `intents_csv`) se resuelven **respecto al directorio donde está el `config.json`**.
+Todas las variables que suelen cambiar entre entornos conviven en un solo archivo en la raíz. Las rutas relativas (p. ej. `intents_csv`) se resuelven **respecto al directorio donde está el `config.json`**. Los archivos con BOM UTF-8 (común al guardar desde Excel o Notepad en Windows) se leen correctamente.
 
 | Clave | Descripción |
 |-------|-------------|
@@ -138,17 +152,20 @@ Todas las variables que suelen cambiar entre entornos conviven en un solo archiv
 | `intents_csv` | Ruta al CSV de intenciones (relativa al `config.json` o absoluta). |
 | `ollama.host` | URL base del API de Ollama (sin barra final recomendable). |
 | `ollama.pull_on_startup` | Si es `true`, intenta `pull` del modelo al arrancar. |
-| `ollama.chat_timeout_seconds` | Timeout HTTP para el LLM del router y referencia de tiempos largos. |
-| `router_model.name` | Nombre del modelo en Ollama (chat y, si aplica, uso del LLM en el router). |
-| `router_model.temperature` | Temperatura para chat (y coherente con el wrapper del router). |
+| `ollama.chat_timeout_seconds` | Timeout HTTP para cada llamada a Ollama. |
+| `ollama.max_retries` | Número de reintentos con backoff exponencial (1 s / 2 s / 4 s…) ante fallas de red o 5xx. Por defecto `3`. |
+| `router_model.name` | Nombre del modelo en Ollama (clasificador y respuesta). |
+| `router_model.temperature` | Temperatura de generación (default `0.1`; menor = respuestas más deterministas). |
 | `router_model.max_tokens` | Límite de tokens generados (`num_predict` en Ollama). |
 | `semantic_router.encoder.name` | Modelo Hugging Face para embeddings. |
 | `semantic_router.encoder.device` | Por defecto **`"cuda"`** (GPU NVIDIA). Usa `"cpu"` si no hay CUDA o para depuración. |
-| `semantic_router.encoder.score_threshold` | Umbral del encoder (semantic-router). |
+| `semantic_router.encoder.score_threshold` | Umbral mínimo de similitud; consultas por debajo disparan el fallback LLM si está activo. |
 | `semantic_router.auto_sync` | Modo de índice local (p. ej. `"local"`). |
 | `semantic_router.top_k` | Top-K del router. |
 | `semantic_router.aggregation` | Estrategia de agregación (p. ej. `"mean"`). |
-| `chat.system_prompt` | Prompt de sistema; debe incluir el placeholder `{route_name}`. |
+| `semantic_router.llm_fallback` | `true` activa el clasificador LLM cuando el encoder no supera el umbral. Por defecto `false`. |
+| `semantic_router.classifier_prompt_file` | Ruta al system prompt del clasificador LLM de fallback (p. ej. `"Prompts/router.txt"`). Solo se usa si `llm_fallback` es `true`. |
+| `chat.system_prompt` | Prompt de sistema para la respuesta al usuario; debe incluir el placeholder `{route_name}`. |
 | `chat.exit_commands` | Palabras para salir del bucle (comparación sin distinguir mayúsculas). |
 
 ### Otro archivo de configuración
@@ -173,16 +190,34 @@ python -m ruteador_semantico
 Con configuración explícita:
 
 ```powershell
-python -m ruteador_semantico --config D:\Dev\Ruteador Inten\config.json
+python -m ruteador_semantico --config "D:\Dev\Ruteador Inten\config.json"
 ```
 
-Al arrancar se imprime la ruta del `config.json` cargado, una línea con **PyTorch CUDA** si la GPU está visible, y un **listado de todas las rutas generadas** con sus ejemplos. Si el config pide CUDA y PyTorch no detecta GPU, verás una **advertencia** en consola. Luego el chat: escribes mensajes; el programa muestra la intención detectada y la respuesta del modelo. Para salir, usa una de las cadenas en `chat.exit_commands` (p. ej. `salir`).
+Al arrancar, los mensajes de diagnóstico (ruta del config, estado CUDA, descarga del modelo) se emiten por **stderr** mediante el módulo `logging`. El nivel de detalle se controla con la variable de entorno `RUTEADOR_LOG_LEVEL` (valores: `DEBUG`, `INFO`, `WARNING`, `ERROR`; por defecto `INFO`):
+
+```powershell
+$env:RUTEADOR_LOG_LEVEL = "DEBUG"
+python -m ruteador_semantico
+```
+
+Luego se imprime en **stdout** el **listado de rutas** con sus ejemplos y arranca el chat interactivo: escribís mensajes, el programa muestra la intención detectada y la respuesta del modelo. Para salir, usá una de las cadenas en `chat.exit_commands` (p. ej. `salir`).
+
+### Tests unitarios
+
+```powershell
+pip install -r requirements-dev.txt
+pytest tests/ -v
+```
+
+Los tests en `tests/` no requieren GPU ni Ollama en ejecución: `tests/conftest.py` reemplaza las dependencias pesadas (`semantic_router`, `pydantic`, `ollama`) con mocks livianos para que el CI funcione en cualquier entorno.
 
 ## Documentación adicional
 
 - `Doc/semanticRouter.md` — referencia rápida de semantic-router con Ollama.
+- `Doc/analisis_prompt.md` — análisis del prompt clasificador, taxonomía de categorías, recomendaciones.
+- `Doc/mistral_vs_qwen.md` — comparativa de modelos para el caso de uso municipal.
 - Repositorio upstream: [aurelio-labs/semantic-router](https://github.com/aurelio-labs/semantic-router).
 
-## Nota sobre el host de Ollama
+## Nota sobre los llamados HTTP a Ollama
 
-La clase `ConfigurableOllamaLLM` en este proyecto envía las peticiones del LLM del router a la URL definida en `ollama.host`. El cliente de chat usa la misma base vía `OLLAMA_HOST` / `ollama.Client(host=...)`. Si Ollama corre en otra máquina o en Docker, ajusta `ollama.host` y la conectividad de red en consecuencia.
+Todos los llamados a `/api/chat` se hacen con `requests.post()` directamente (no con `ollama.Client.chat()`). Esto permite pasar `"think": false` al nivel raíz del payload de Ollama, parámetro necesario para suprimir el modo *thinking* de Qwen3.5 y recibir respuestas limpias. La URL base se lee siempre de `ollama.host` en `config.json`. Si Ollama corre en otra máquina o en Docker, ajustá ese valor y la conectividad de red en consecuencia.
