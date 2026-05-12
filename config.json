@@ -9,7 +9,7 @@
   },
   "router_model": {
     "name": "qwen3.5:9b",
-    "temperature": 0.3,
+    "temperature": 0.1,
     "max_tokens": 512
   },
   "semantic_router": {

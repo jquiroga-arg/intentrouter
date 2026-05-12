@@ -62,9 +62,10 @@ class ConfigurableOllamaLLM(BaseLLM):
         payload = {
             "model": model_name,
             "messages": [m.to_openai() for m in messages],
-            "options": {"temperature": temperature, "num_predict": max_tokens},
+            "think": False,
             "format": "json",
             "stream": stream,
+            "options": {"temperature": temperature, "num_predict": max_tokens},
         }
         try:
             response = requests.post(
