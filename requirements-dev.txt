@@ -1,0 +1,11 @@
+# Dependencias de desarrollo / testing
+# Instalar junto con requirements.txt:
+#   pip install -r requirements.txt -r requirements-dev.txt
+#
+# Ejecutar los tests desde la raíz del proyecto:
+#   pytest tests/ -v
+#
+# Para ver logs de nivel DEBUG durante los tests:
+#   pytest tests/ -v -s
+
+pytest>=7.4

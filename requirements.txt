@@ -1,5 +1,16 @@
-# Windows + NVIDIA CUDA: PyTorch con wheels CUDA 12.4 (ajusta la URL si usas otra
-# variante según https://pytorch.org/get-started/locally/ ).
+# ── PyTorch con CUDA ────────────────────────────────────────────────────────
+# Los wheels cu124 son compatibles con drivers CUDA 12.x Y 13.x (retro-
+# compatibilidad garantizada por NVIDIA). Para otras variantes de CUDA:
+#   https://pytorch.org/get-started/locally/
+#
+# IMPORTANTE: --extra-index-url no garantiza el wheel CUDA (pip puede preferir
+# el wheel CPU de PyPI). Instalá torch primero con --index-url exclusivo
+# (lo hace automáticamente install-windows-cuda.ps1):
+#
+#   pip install "torch>=2.3.0,<2.8.0" --index-url https://download.pytorch.org/whl/cu124
+#
+# Si prescindís del script, usá el comando de arriba antes de este requirements.
+# ─────────────────────────────────────────────────────────────────────────────
 --extra-index-url https://download.pytorch.org/whl/cu124
 torch>=2.3.0,<2.8.0
 semantic-router[local]>=0.1.0

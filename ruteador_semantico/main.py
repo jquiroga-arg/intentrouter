@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import json
+import logging
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -14,8 +17,22 @@ from semantic_router.encoders import HuggingFaceEncoder
 from semantic_router.routers import SemanticRouter
 
 from ruteador_semantico.load_config import default_config_path, load_app_config, resolve_path
-from ruteador_semantico.ollama_llm import ConfigurableOllamaLLM
+from ruteador_semantico.ollama_llm import INTENT_JSON_SCHEMA, ConfigurableOllamaLLM
 from ruteador_semantico.routes_csv import routes_from_intents_csv
+
+logger = logging.getLogger("ruteador")
+
+
+def _configure_logging() -> None:
+    """Configura logging desde la variable de entorno RUTEADOR_LOG_LEVEL (default: INFO)."""
+    level_name = os.environ.get("RUTEADOR_LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    logging.basicConfig(
+        stream=sys.stderr,
+        level=level,
+        format="%(asctime)s [%(levelname)-8s] %(message)s",
+        datefmt="%H:%M:%S",
+    )
 
 
 def _print_routes_banner(cfg: Mapping[str, Any], routes: list) -> None:
@@ -38,56 +55,140 @@ def _print_routes_banner(cfg: Mapping[str, Any], routes: list) -> None:
     print()
 
 
+def _resolve_cuda_device(requested: str) -> str:
+    """Si se pide CUDA pero no está disponible, retorna 'cpu' como fallback seguro.
+
+    Evita el crash de HuggingFaceEncoder cuando torch no tiene soporte CUDA
+    (wheel CPU instalado, drivers ausentes, etc.).
+    """
+    if "cuda" not in requested.lower():
+        return requested
+    try:
+        import torch
+    except ImportError:
+        logger.warning(
+            'device="%s" solicitado pero torch no está instalado → usando "cpu". '
+            "Verificá la instalación de PyTorch (ver requirements.txt).",
+            requested,
+        )
+        return "cpu"
+    if torch.cuda.is_available():
+        try:
+            logger.info("PyTorch CUDA: %s", torch.cuda.get_device_name(0))
+        except Exception:
+            logger.info("PyTorch CUDA: GPU detectada.")
+        return requested
+    logger.warning(
+        'device="%s" solicitado pero torch.cuda.is_available() es False → usando "cpu". '
+        "Verificá que el wheel de PyTorch tenga soporte CUDA "
+        "(wheel CPU instalado por defecto si se usa --extra-index-url). "
+        "Reinstalá con: pip install torch>=2.3.0 "
+        "--index-url https://download.pytorch.org/whl/cu124",
+        requested,
+    )
+    return "cpu"
+
+
 def _build_encoder(enc_cfg: Mapping[str, Any]) -> HuggingFaceEncoder:
+    device = str(enc_cfg.get("device") or "").strip()
+    if "cuda" in device.lower():
+        device = _resolve_cuda_device(device)
     kwargs: dict[str, Any] = {
         "name": enc_cfg.get("name", "sentence-transformers/all-MiniLM-L6-v2"),
         "score_threshold": enc_cfg.get("score_threshold", 0.5),
     }
-    device = enc_cfg.get("device")
-    if device is not None and str(device).strip() != "":
-        kwargs["device"] = str(device).strip()
+    if device:
+        kwargs["device"] = device
     return HuggingFaceEncoder(**kwargs)
-
-
-def _log_cuda_encoder_status(enc_cfg: Mapping[str, Any]) -> None:
-    """Avisa si el config pide CUDA y PyTorch no ve GPU (drivers / wheel incorrecto)."""
-    device = enc_cfg.get("device")
-    if device is None or str(device).strip() == "":
-        return
-    if "cuda" not in str(device).lower():
-        return
-    try:
-        import torch
-    except ImportError:
-        return
-    if torch.cuda.is_available():
-        try:
-            print(f"PyTorch CUDA: {torch.cuda.get_device_name(0)}")
-        except Exception:
-            print("PyTorch CUDA: GPU detectada.")
-        return
-    print(
-        "\n[ADVERTENCIA] semantic_router.encoder.device usa CUDA pero "
-        "torch.cuda.is_available() es False.\n"
-        "  Revisa: drivers NVIDIA, instalación de torch con CUDA (requirements.txt) "
-        "y que la GPU no esté ocupada exclusivamente por otro proceso.\n"
-        "  Mientras tanto puedes poner \"device\": \"cpu\" en config.json.\n",
-        file=sys.stderr,
-    )
 
 
 def _maybe_pull_model(host: str, model: str, do_pull: bool) -> None:
     if not do_pull:
         return
     client = ollama.Client(host=host)
-    print(f"Comprobando/descargando modelo Ollama: {model!r} …")
+    logger.info("Comprobando/descargando modelo Ollama: %r …", model)
     client.pull(model)
+
+
+def _post_with_retry(
+    url: str, payload: dict, timeout: float, max_retries: int
+) -> requests.Response:
+    """HTTP POST con reintentos exponenciales. No reintenta errores de cliente (4xx)."""
+    last_exc: Exception = RuntimeError("Sin intentos")
+    for attempt in range(max_retries + 1):
+        try:
+            resp = requests.post(url, json=payload, timeout=timeout)
+            resp.raise_for_status()
+            return resp
+        except requests.exceptions.HTTPError as exc:
+            if exc.response is not None and 400 <= exc.response.status_code < 500:
+                raise
+            last_exc = exc
+        except Exception as exc:
+            last_exc = exc
+        if attempt < max_retries:
+            wait = 2 ** attempt
+            logger.debug(
+                "Ollama no disponible (intento %d/%d), reintentando en %ds: %s",
+                attempt + 1, max_retries + 1, wait, last_exc,
+            )
+            time.sleep(wait)
+    raise last_exc
+
+
+def _load_classifier_prompt(cfg: dict, base_dir: Path) -> str | None:
+    """Carga el prompt del clasificador LLM desde el archivo configurado."""
+    sr_cfg = cfg.get("semantic_router", {}) or {}
+    prompt_file = sr_cfg.get("classifier_prompt_file")
+    if not prompt_file:
+        return None
+    path = resolve_path(base_dir, str(prompt_file))
+    if not path.is_file():
+        logger.warning("classifier_prompt_file no encontrado: %s", path)
+        return None
+    return path.read_text(encoding="utf-8-sig")
+
+
+def _llm_classify(
+    user_text: str,
+    classifier_prompt: str,
+    host: str,
+    model: str,
+    timeout: float,
+    max_retries: int,
+) -> str:
+    """Clasificador LLM de fallback. Retorna el nombre de intención en mayúsculas."""
+    resp = _post_with_retry(
+        f"{host}/api/chat",
+        {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": classifier_prompt},
+                {"role": "user", "content": user_text},
+            ],
+            "think": False,
+            "stream": False,
+            "format": INTENT_JSON_SCHEMA,
+            "options": {"temperature": 0.0, "num_predict": 128},
+        },
+        timeout,
+        max_retries,
+    )
+    try:
+        data = json.loads(resp.json()["message"]["content"])
+        intent = str(data.get("intent", "inexistente")).upper()
+        confidence = float(data.get("confidence", 0.0))
+        logger.debug("LLM clasificó → %s (confianza=%.2f)", intent, confidence)
+        return intent
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+        logger.warning("LLM clasificador retornó JSON inválido; usando INEXISTENTE")
+        return "INEXISTENTE"
 
 
 def run(config_path: Path | None = None) -> None:
     raw_cfg, base_dir, resolved_config = load_app_config(config_path)
     cfg: dict[str, Any] = dict(raw_cfg)
-    print(f"Configuración: {resolved_config}")
+    logger.info("Configuración: %s", resolved_config)
 
     intents_rel = cfg.get("intents_csv", "Test/intents.csv")
     intents_path = resolve_path(base_dir, str(intents_rel))
@@ -97,6 +198,7 @@ def run(config_path: Path | None = None) -> None:
     ollama_cfg = cfg.get("ollama", {}) or {}
     host = str(ollama_cfg.get("host", "http://127.0.0.1:11434")).rstrip("/")
     os.environ["OLLAMA_HOST"] = host
+    max_retries = int(ollama_cfg.get("max_retries", 3))
 
     model_cfg = cfg.get("router_model", {}) or {}
     model_name = str(model_cfg.get("name", "qwen3.5:9b"))
@@ -114,16 +216,16 @@ def run(config_path: Path | None = None) -> None:
 
     sr_cfg = cfg.get("semantic_router", {}) or {}
     enc_cfg = sr_cfg.get("encoder", {}) or {}
-    _log_cuda_encoder_status(enc_cfg)
     encoder = _build_encoder(enc_cfg)
 
     llm = ConfigurableOllamaLLM(
         name=model_name,
         ollama_host=host,
-        temperature=float(model_cfg.get("temperature", 0.3)),
+        temperature=float(model_cfg.get("temperature", 0.1)),
         max_tokens=int(model_cfg.get("max_tokens", 512)),
         stream=False,
         request_timeout=chat_timeout,
+        max_retries=max_retries,
     )
 
     router = SemanticRouter(
@@ -149,7 +251,22 @@ def run(config_path: Path | None = None) -> None:
         for x in (chat_cfg.get("exit_commands") or ["salir", "exit", "quit"])
     }
 
-    print("Chat municipal (semantic-router + Ollama). Escribe 'salir' para terminar.\n")
+    llm_fallback = bool(sr_cfg.get("llm_fallback", False))
+    classifier_prompt = _load_classifier_prompt(cfg, base_dir) if llm_fallback else None
+    if llm_fallback and classifier_prompt is None:
+        logger.warning(
+            "llm_fallback=true pero no se pudo cargar el prompt clasificador; "
+            "el fallback quedará desactivado."
+        )
+        llm_fallback = False
+
+    logger.info(
+        "Iniciando chat — modelo=%s | fallback-LLM=%s",
+        model_name,
+        "sí" if llm_fallback else "no",
+    )
+    print("\nChat municipal (semantic-router + Ollama). Escribe 'salir' para terminar.\n")
+
     while True:
         try:
             user = input("Tú: ").strip()
@@ -164,14 +281,22 @@ def run(config_path: Path | None = None) -> None:
 
         choice = router(user)
         route_name = getattr(choice, "name", None)
-        label = route_name if route_name else "null"
-        print(f"[router] intención: {label}")
+
+        if route_name is None and llm_fallback:
+            logger.debug("Embedding router sin coincidencia; activando clasificador LLM")
+            label = _llm_classify(
+                user, classifier_prompt, host, model_name, chat_timeout, max_retries
+            )
+        else:
+            label = route_name if route_name else "null"
+
+        logger.debug("intención detectada: %s", label)
 
         system_content = system_template.format(route_name=label)
         try:
-            resp = requests.post(
+            resp = _post_with_retry(
                 f"{host}/api/chat",
-                json={
+                {
                     "model": model_name,
                     "messages": [
                         {"role": "system", "content": system_content},
@@ -180,20 +305,21 @@ def run(config_path: Path | None = None) -> None:
                     "think": False,
                     "stream": False,
                     "options": {
-                        "temperature": float(model_cfg.get("temperature", 0.3)),
+                        "temperature": float(model_cfg.get("temperature", 0.1)),
                         "num_predict": int(model_cfg.get("max_tokens", 512)),
                     },
                 },
-                timeout=chat_timeout,
+                chat_timeout,
+                max_retries,
             )
-            resp.raise_for_status()
             text = resp.json()["message"]["content"].strip()
             print(f"Asistente: {text}\n")
         except Exception as e:
-            print(f"Error llamando a Ollama: {e}\n", file=sys.stderr)
+            logger.error("Error al llamar a Ollama: %s", e)
 
 
 def main() -> None:
+    _configure_logging()
     parser = argparse.ArgumentParser(description="Chat consola con semantic-router + Ollama")
     parser.add_argument(
         "--config",
