@@ -1,6 +1,6 @@
 # Informe: Mistral 7B Instruct vs Qwen3.5-9B para el ruteador de intenciones
 
-> Contexto: clasificador de intenciones del chatbot municipal (San Isidro), prompt tipo `Promts/route_intent.txt`, inferencia vía Ollama.  
+> Contexto: clasificador de intenciones del chatbot municipal (San Isidro), prompt tipo `Prompts/route_intent.txt`, inferencia vía Ollama.  
 > Hardware de referencia: **NVIDIA L4, 24 GB VRAM** (~6 GB en uso con `qwen3.5:9b` en cuantización típica).  
 > Fecha: 2026-04-17  
 > Complementa: `analisis1.md` (problemas del prompt, taxonomía sugerida, JSON Schema, `think: false`, etc.).
@@ -99,4 +99,4 @@ Orden sugerido de impacto / riesgo:
 ## 7. Referencias internas del repo
 
 - `analisis1.md` — análisis del prompt, riesgos de thinking, Schema, taxonomía ampliada, configuración Ollama.
-- `Promts/route_intent.txt` / `Promts/route_intent2.txt` — versiones del clasificador.
+- `Prompts/route_intent.txt` / `Prompts/route_intent2.txt` — versiones del clasificador.

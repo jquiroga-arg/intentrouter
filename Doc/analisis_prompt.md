@@ -8,7 +8,7 @@
 
 ## 1. Contexto del sistema
 
-- **Prompt**: `Promts/route_intent.txt` — clasifica la consulta del usuario en una de 7 categorías (`salud`, `tramites`, `deportes`, `cultura`, `general`, `saludo`, `inexistente`) y devuelve `{"intent": "<categoria>"}`.
+- **Prompt**: `Prompts/route_intent.txt` — clasifica la consulta del usuario en una de 7 categorías (`salud`, `tramites`, `deportes`, `cultura`, `general`, `saludo`, `inexistente`) y devuelve `{"intent": "<categoria>"}`.
 - **Modelo**: `Qwen3.5-9B` (Alibaba, 2026-03-02), multimodal (texto, imagen, video), 262 K de contexto, 201 idiomas, thinking mode ON por defecto, Apache 2.0. En Ollama: `qwen3.5:9b` (Q4_K_M, 6.6 GB).
 
 ---
@@ -98,7 +98,7 @@ Faltan: "no uses markdown", "no respondas la consulta", "no uses code fences", q
 
 - Línea 3: "analizar detalladamente… NO RESPONDAS LA CONSULTA" puede inducir al modelo a escribir ese análisis. Mejor: "analizá internamente".
 - Inconsistencia de estilo: voseo imperativo ("Clasificá", "Respondé") vs. infinitivo ("analizar").
-- Nombre del directorio: `Promts` (sic). Cosmético.
+- Nombre del directorio: `Prompts` (sic). Cosmético.
 
 ---
 
@@ -208,7 +208,7 @@ Armar un **golden set de 150–200 consultas etiquetadas** (reales, con voseo, t
 
 ### Sugerencia 10 — Cosméticas y mantenimiento
 
-- Renombrar `Promts/` → `Prompts/`.
+- Renombrar `Prompts/` → `Prompts/`.
 - Versionar el prompt con header `# version: N — fecha`.
 - Agregar un *canary* al final (ej. `# fin de instrucciones`): si aparece en la respuesta, hubo leak de system prompt.
 

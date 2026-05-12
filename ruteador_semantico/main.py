@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 import ollama
+import requests
 from semantic_router.encoders import HuggingFaceEncoder
 from semantic_router.routers import SemanticRouter
 
@@ -148,8 +149,6 @@ def run(config_path: Path | None = None) -> None:
         for x in (chat_cfg.get("exit_commands") or ["salir", "exit", "quit"])
     }
 
-    ollama_client = ollama.Client(host=host)
-
     print("Chat municipal (semantic-router + Ollama). Escribe 'salir' para terminar.\n")
     while True:
         try:
@@ -170,18 +169,25 @@ def run(config_path: Path | None = None) -> None:
 
         system_content = system_template.format(route_name=label)
         try:
-            resp = ollama_client.chat(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": system_content},
-                    {"role": "user", "content": user},
-                ],
-                options={
-                    "temperature": float(model_cfg.get("temperature", 0.3)),
-                    "num_predict": int(model_cfg.get("max_tokens", 512)),
+            resp = requests.post(
+                f"{host}/api/chat",
+                json={
+                    "model": model_name,
+                    "messages": [
+                        {"role": "system", "content": system_content},
+                        {"role": "user", "content": user},
+                    ],
+                    "think": False,
+                    "stream": False,
+                    "options": {
+                        "temperature": float(model_cfg.get("temperature", 0.3)),
+                        "num_predict": int(model_cfg.get("max_tokens", 512)),
+                    },
                 },
+                timeout=chat_timeout,
             )
-            text = (resp.get("message") or {}).get("content", "").strip()
+            resp.raise_for_status()
+            text = resp.json()["message"]["content"].strip()
             print(f"Asistente: {text}\n")
         except Exception as e:
             print(f"Error llamando a Ollama: {e}\n", file=sys.stderr)

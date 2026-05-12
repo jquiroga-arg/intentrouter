@@ -19,7 +19,7 @@ def load_app_config(path: Path | None = None) -> tuple[Mapping[str, Any], Path, 
     config_path = (path or default_config_path()).resolve()
     if not config_path.is_file():
         raise FileNotFoundError(f"No existe config.json: {config_path}")
-    data = json.loads(config_path.read_text(encoding="utf-8"))
+    data = json.loads(config_path.read_text(encoding="utf-8-sig"))
     base = config_path.parent
     return data, base, config_path
 

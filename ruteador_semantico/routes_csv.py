@@ -13,7 +13,7 @@ from semantic_router import Route
 def routes_from_intents_csv(csv_path: Path) -> List[Route]:
     """CSV sin cabecera: id,utterance,category (utterance puede ir entre comillas)."""
     by_category: dict[str, list[str]] = defaultdict(list)
-    with csv_path.open(newline="", encoding="utf-8") as f:
+    with csv_path.open(newline="", encoding="utf-8-sig") as f:
         reader = csv.reader(f)
         for row in reader:
             if len(row) < 3:
