@@ -32,6 +32,7 @@ def _configure_logging() -> None:
         level=level,
         format="%(asctime)s [%(levelname)-8s] %(message)s",
         datefmt="%H:%M:%S",
+        force=True,
     )
 
 
@@ -290,7 +291,7 @@ def run(config_path: Path | None = None) -> None:
         else:
             label = route_name if route_name else "null"
 
-        logger.debug("intención detectada: %s", label)
+        logger.info("intención detectada: %s", label)
 
         system_content = system_template.format(route_name=label)
         try:
