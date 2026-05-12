@@ -85,7 +85,7 @@ Todos los llamados a Ollama usan `"think": false` (HTTP, nivel raíz del payload
 
 | Paquete | Uso |
 |---------|-----|
-| `torch` (wheel **cu124**) | Backend GPU del encoder vía `--extra-index-url` de PyTorch; evita el wheel solo-CPU por defecto en PyPI. |
+| `torch` (wheel **cu124**) | Backend GPU del encoder. Los wheels `cu124` son compatibles con **CUDA 12.x y 13.x** (retrocompatibilidad NVIDIA). Instalarlo con `--index-url` (ver script) garantiza el wheel CUDA; `--extra-index-url` puede ceder a la variante CPU de PyPI. |
 | `semantic-router[local]` | Router semántico + encoder Hugging Face local (`transformers`, etc.). |
 | `ollama` | Cliente Python para el `pull` del modelo al arrancar. |
 | `requests` | Peticiones HTTP directas a `/api/chat` (clasificador y respuesta); permite pasar `think:false` al nivel raíz del payload. |
@@ -101,9 +101,15 @@ Todos los llamados a Ollama usan `"think": false` (HTTP, nivel raíz del payload
 - **Windows 10/11** (64 bits).
 - **Python** 3.10 u 11 recomendado (64 bits, desde [python.org](https://www.python.org/downloads/windows/)).
 - **GPU NVIDIA** con drivers recientes; comprobar con `nvidia-smi` en PowerShell.
-- **CUDA 12.x** compatible con el wheel usado: el repo apunta a **CUDA 12.4** (`cu124`) en el índice de PyTorch. Si tu driver/stack usa otra variante, cambia la línea `--extra-index-url` en `requirements.txt` según la [matriz oficial de PyTorch](https://pytorch.org/get-started/locally/).
+- **CUDA 12.x o 13.x**: los wheels `cu124` funcionan con cualquier driver CUDA 12.x y 13.x gracias a la retrocompatibilidad de NVIDIA. No hace falta cambiar nada por tener CUDA 13.0. Para drivers más antiguos (11.x) o variantes distintas, ajustá la URL en `requirements.txt` y en el script según la [matriz oficial de PyTorch](https://pytorch.org/get-started/locally/).
 - **[Ollama para Windows](https://ollama.com/download)** con el modelo de `router_model.name`. Ollama usa la GPU NVIDIA automáticamente cuando los drivers lo permiten (comprueba con `nvidia-smi` mientras generas texto).
 - **Compilación C++ (recomendado para `pip install`):** instala [Build Tools para Visual Studio](https://visualstudio.microsoft.com/es/visual-cpp-build-tools/) (o Visual Studio completo) con la carga de trabajo **Desarrollo de escritorio con C++** (MSVC, Windows SDK, entorno para `nmake`). Así evitas errores del tipo *`nmake` no encontrado* o *`CMAKE_C_COMPILER not set`* al construir **llama-cpp-python**. Tras instalarlo, ejecuta la instalación de dependencias desde **PowerShell para desarrolladores de VS** o **Símbolo del sistema de herramientas nativas x64**, o asegúrate de que el PATH incluya el kit de compilación, para que CMake encuentre el compilador.
+
+> **Si la GPU no aparece al ejecutar (`torch.cuda.is_available()` da `False`):** lo más frecuente es que pip instaló el wheel **CPU** de PyPI en lugar del wheel CUDA. El script `install-windows-cuda.ps1` lo evita instalando torch primero con `--index-url`. Si instalaste manualmente con solo `pip install -r requirements.txt`, reinstalá torch con:
+> ```powershell
+> pip install "torch>=2.3.0,<2.8.0" --index-url https://download.pytorch.org/whl/cu124
+> ```
+> La app igualmente arranca en modo CPU como fallback automático, pero sin aceleración GPU para los embeddings.
 
 ## Instalación (Windows + NVIDIA CUDA)
 
@@ -123,8 +129,11 @@ Todos los llamados a Ollama usan `"think": false` (HTTP, nivel raíz del payload
    python -m venv .venv
    .\.venv\Scripts\Activate.ps1
    python -m pip install --upgrade pip
+   # Instalar torch PRIMERO con --index-url para garantizar el wheel CUDA
+   pip install "torch>=2.3.0,<2.8.0" --index-url https://download.pytorch.org/whl/cu124
+   # Instalar el resto de dependencias
    pip install -r requirements.txt
-   python -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else '')"
+   python -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU mode')"
    ```
 
 4. Instalar y arrancar **Ollama**. Comprobar API en `ollama.host` del `config.json` (por defecto `http://127.0.0.1:11434`).

@@ -55,39 +55,51 @@ def _print_routes_banner(cfg: Mapping[str, Any], routes: list) -> None:
     print()
 
 
-def _build_encoder(enc_cfg: Mapping[str, Any]) -> HuggingFaceEncoder:
-    kwargs: dict[str, Any] = {
-        "name": enc_cfg.get("name", "sentence-transformers/all-MiniLM-L6-v2"),
-        "score_threshold": enc_cfg.get("score_threshold", 0.5),
-    }
-    device = enc_cfg.get("device")
-    if device is not None and str(device).strip() != "":
-        kwargs["device"] = str(device).strip()
-    return HuggingFaceEncoder(**kwargs)
+def _resolve_cuda_device(requested: str) -> str:
+    """Si se pide CUDA pero no está disponible, retorna 'cpu' como fallback seguro.
 
-
-def _log_cuda_encoder_status(enc_cfg: Mapping[str, Any]) -> None:
-    """Avisa si el config pide CUDA y PyTorch no ve GPU (drivers / wheel incorrecto)."""
-    device = enc_cfg.get("device")
-    if device is None or str(device).strip() == "":
-        return
-    if "cuda" not in str(device).lower():
-        return
+    Evita el crash de HuggingFaceEncoder cuando torch no tiene soporte CUDA
+    (wheel CPU instalado, drivers ausentes, etc.).
+    """
+    if "cuda" not in requested.lower():
+        return requested
     try:
         import torch
     except ImportError:
-        return
+        logger.warning(
+            'device="%s" solicitado pero torch no está instalado → usando "cpu". '
+            "Verificá la instalación de PyTorch (ver requirements.txt).",
+            requested,
+        )
+        return "cpu"
     if torch.cuda.is_available():
         try:
             logger.info("PyTorch CUDA: %s", torch.cuda.get_device_name(0))
         except Exception:
             logger.info("PyTorch CUDA: GPU detectada.")
-        return
+        return requested
     logger.warning(
-        "semantic_router.encoder.device usa CUDA pero torch.cuda.is_available() es False. "
-        "Revisá: drivers NVIDIA, wheel de torch con CUDA (requirements.txt) y que la GPU "
-        'no esté ocupada. Podés usar "device": "cpu" en config.json.'
+        'device="%s" solicitado pero torch.cuda.is_available() es False → usando "cpu". '
+        "Verificá que el wheel de PyTorch tenga soporte CUDA "
+        "(wheel CPU instalado por defecto si se usa --extra-index-url). "
+        "Reinstalá con: pip install torch>=2.3.0 "
+        "--index-url https://download.pytorch.org/whl/cu124",
+        requested,
     )
+    return "cpu"
+
+
+def _build_encoder(enc_cfg: Mapping[str, Any]) -> HuggingFaceEncoder:
+    device = str(enc_cfg.get("device") or "").strip()
+    if "cuda" in device.lower():
+        device = _resolve_cuda_device(device)
+    kwargs: dict[str, Any] = {
+        "name": enc_cfg.get("name", "sentence-transformers/all-MiniLM-L6-v2"),
+        "score_threshold": enc_cfg.get("score_threshold", 0.5),
+    }
+    if device:
+        kwargs["device"] = device
+    return HuggingFaceEncoder(**kwargs)
 
 
 def _maybe_pull_model(host: str, model: str, do_pull: bool) -> None:
@@ -204,7 +216,6 @@ def run(config_path: Path | None = None) -> None:
 
     sr_cfg = cfg.get("semantic_router", {}) or {}
     enc_cfg = sr_cfg.get("encoder", {}) or {}
-    _log_cuda_encoder_status(enc_cfg)
     encoder = _build_encoder(enc_cfg)
 
     llm = ConfigurableOllamaLLM(
