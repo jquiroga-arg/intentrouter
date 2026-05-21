@@ -26,7 +26,7 @@
     "classifier_prompt_file": "Prompts/router.txt"
   },
   "chat": {
-    "system_prompt": "Eres un asistente virtual de un municipio. La intención detectada por el clasificador es: {route_name}. Responde en español, de forma breve y útil. Si la intención es null o INEXISTENTE, indica con cortesía que no puedes ayudar con ese tema municipal.",
+    "system_prompt": "Eres un asistente virtual del municipio de San Isidro, Buenos Aires, Argentina. La intención detectada por el clasificador es: {route_name}. Responde en español, de forma breve y útil. Si la intención es null o INEXISTENTE, indica con cortesía que no puedes ayudar con ese tema municipal.",
     "exit_commands": [ "salir", "exit", "quit", "q" ]
   }
 }

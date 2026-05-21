@@ -200,19 +200,25 @@ def run(config_path: Path | None = None) -> None:
     cfg: dict[str, Any] = dict(raw_cfg)
     logger.info("Configuración: %s", resolved_config)
 
-    intents_rel = cfg.get("intents_csv", "Test/intents.csv")
+    intents_rel = cfg.get("intents_csv", "Intents/msi-intents.csv")
     intents_path = resolve_path(base_dir, str(intents_rel))
     if not intents_path.is_file():
         raise FileNotFoundError(f"No se encontró el CSV de intenciones: {intents_path}")
+
+    logger.info("Utilizando intenciones: %s", intents_path)
 
     ollama_cfg = cfg.get("ollama", {}) or {}
     host = str(ollama_cfg.get("host", "http://127.0.0.1:11434")).rstrip("/")
     os.environ["OLLAMA_HOST"] = host
     max_retries = int(ollama_cfg.get("max_retries", 3))
 
+    logger.info("Utilizando ollama host: %s", host)
+
     model_cfg = cfg.get("router_model", {}) or {}
     model_name = str(model_cfg.get("name", "qwen3.5:9b"))
     chat_timeout = float(ollama_cfg.get("chat_timeout_seconds", 120))
+
+    logger.info("Utilizando router model: %s", model_name)
 
     _maybe_pull_model(
         host,
@@ -257,7 +263,7 @@ def run(config_path: Path | None = None) -> None:
     system_template = str(
         chat_cfg.get("system_prompt")
         or (
-            "Eres un asistente virtual de un municipio. La intención detectada "
+            "Eres un asistente virtual del municipio de San Isidro, Buenos Aires, Argentina. La intención detectada "
             "por el clasificador es: {route_name}. Responde en español, de forma "
             "breve y útil. Si la intención es null o INEXISTENTE, indica con "
             "cortesía que no puedes ayudar con ese tema municipal."
