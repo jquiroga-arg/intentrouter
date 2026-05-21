@@ -3,9 +3,27 @@
 from __future__ import annotations
 
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
+
+
+# ---------------------------------------------------------------------------
+# _cuda_reinstall_hint
+# ---------------------------------------------------------------------------
+
+def test_cuda_reinstall_hint_windows():
+    from ruteador_semantico.main import _cuda_reinstall_hint
+
+    with patch.object(sys, "platform", "win32"):
+        assert _cuda_reinstall_hint() == "./install-windows-cuda.ps1"
+
+
+def test_cuda_reinstall_hint_linux():
+    from ruteador_semantico.main import _cuda_reinstall_hint
+
+    with patch.object(sys, "platform", "linux"):
+        assert _cuda_reinstall_hint() == "./install-linux-cuda.sh"
 
 
 # ---------------------------------------------------------------------------

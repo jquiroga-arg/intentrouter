@@ -122,3 +122,19 @@ def test_default_config_path_fallback_to_package_dir(monkeypatch):
     assert result.name == "config.json"
     # Debe estar en el directorio padre del paquete
     assert result.parent.name == "intentrouter" or (result.parent / "ruteador_semantico").is_dir()
+
+
+def test_load_linux_cuda_config_from_repo_root():
+    """config.linux-cuda.json del repo debe cargarse y resolver rutas relativas."""
+    repo_root = Path(__file__).resolve().parent.parent
+    cfg_path = repo_root / "config.linux-cuda.json"
+    if not cfg_path.is_file():
+        pytest.skip("config.linux-cuda.json no presente en el repo")
+
+    data, base_dir, resolved = load_app_config(cfg_path)
+
+    assert data["environment"] == "linux-cuda"
+    assert base_dir == repo_root
+    intents = resolve_path(base_dir, str(data["intents_csv"]))
+    assert intents == (repo_root / "Test" / "intents.csv").resolve()
+    assert intents.is_file()

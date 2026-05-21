@@ -1,0 +1,6 @@
+chmod +x install-linux-cuda.sh
+./install-linux-cuda.sh
+source .venv/bin/activate
+export RUTEADOR_CONFIG="$(pwd)/config.linux-cuda.json"
+ollama pull qwen3.5:9b
+python -m ruteador_semantico

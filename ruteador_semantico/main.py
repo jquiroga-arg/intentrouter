@@ -56,6 +56,13 @@ def _print_routes_banner(cfg: Mapping[str, Any], routes: list) -> None:
     print()
 
 
+def _cuda_reinstall_hint() -> str:
+    """Script de instalación recomendado según el SO."""
+    if sys.platform.startswith("win"):
+        return "./install-windows-cuda.ps1"
+    return "./install-linux-cuda.sh"
+
+
 def _resolve_cuda_device(requested: str) -> str:
     """Si se pide CUDA pero no está disponible, retorna 'cpu' como fallback seguro.
 
@@ -79,13 +86,15 @@ def _resolve_cuda_device(requested: str) -> str:
         except Exception:
             logger.info("PyTorch CUDA: GPU detectada.")
         return requested
+    hint = _cuda_reinstall_hint()
     logger.warning(
         'device="%s" solicitado pero torch.cuda.is_available() es False → usando "cpu". '
         "Verificá que el wheel de PyTorch tenga soporte CUDA "
         "(wheel CPU instalado por defecto si se usa --extra-index-url). "
-        "Reinstalá con: pip install torch>=2.3.0 "
+        "Reinstalá con %s o: pip install \"torch>=2.3.0,<2.8.0\" "
         "--index-url https://download.pytorch.org/whl/cu124",
         requested,
+        hint,
     )
     return "cpu"
 
@@ -241,16 +250,19 @@ def run(config_path: Path | None = None) -> None:
     _print_routes_banner(cfg, routes)
 
     chat_cfg = cfg.get("chat", {}) or {}
-    system_template = str(
-        chat_cfg.get(
-            "system_prompt",
-            "Intención: {route_name}. Responde en español, breve.",
-        )
-    )
     exit_cmds = {
         x.strip().lower()
         for x in (chat_cfg.get("exit_commands") or ["salir", "exit", "quit"])
     }
+    system_template = str(
+        chat_cfg.get("system_prompt")
+        or (
+            "Eres un asistente virtual de un municipio. La intención detectada "
+            "por el clasificador es: {route_name}. Responde en español, de forma "
+            "breve y útil. Si la intención es null o INEXISTENTE, indica con "
+            "cortesía que no puedes ayudar con ese tema municipal."
+        )
+    )
 
     llm_fallback = bool(sr_cfg.get("llm_fallback", False))
     classifier_prompt = _load_classifier_prompt(cfg, base_dir) if llm_fallback else None
@@ -291,7 +303,7 @@ def run(config_path: Path | None = None) -> None:
         else:
             label = route_name if route_name else "null"
 
-        logger.info("intención detectada: %s", label)
+        logger.info("Intención detectada: %s", label)
 
         system_content = system_template.format(route_name=label)
         try:

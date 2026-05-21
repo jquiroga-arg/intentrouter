@@ -37,4 +37,6 @@ Write-Host "Comprobación rápida de CUDA en PyTorch:"
 Write-Host ""
 Write-Host "Listo. Activá el entorno con:"
 Write-Host "  .\.venv\Scripts\Activate.ps1"
+Write-Host "Config Windows (opcional en esta sesión):"
+Write-Host '  $env:RUTEADOR_CONFIG = (Join-Path $PWD "config.json")'
 Write-Host "Luego: python -m ruteador_semantico"

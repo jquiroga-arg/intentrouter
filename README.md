@@ -2,7 +2,14 @@
 
 Proyecto de demostración que clasifica la intención del usuario con **[semantic-router](https://github.com/aurelio-labs/semantic-router)** (embeddings locales con Hugging Face) y genera la respuesta con **Ollama** y un modelo tipo **Qwen 3.5 9B**. Las rutas del router se generan en tiempo de arranque a partir del CSV de intenciones.
 
-**Entorno por defecto:** Windows con **GPU NVIDIA** y **CUDA** para el encoder PyTorch (`semantic_router.encoder.device`: `"cuda"`). El chat con Ollama usa la GPU que Ollama asigne según su propia configuración y drivers.
+**Entornos soportados:** **Windows** y **Linux (Ubuntu)** con **GPU NVIDIA** y **CUDA** para el encoder PyTorch (`semantic_router.encoder.device`: `"cuda"`). El chat con Ollama usa la GPU que Ollama asigne según su propia configuración y drivers.
+
+| SO | Config por defecto | Script de instalación |
+|----|-------------------|------------------------|
+| Windows | [`config.json`](config.json) (`environment`: `windows-cuda`) | [`install-windows-cuda.ps1`](install-windows-cuda.ps1) |
+| Ubuntu / Linux | [`config.linux-cuda.json`](config.linux-cuda.json) (`environment`: `linux-cuda`) | [`install-linux-cuda.sh`](install-linux-cuda.sh) |
+
+> **WSL2:** usá el flujo Linux (`install-linux-cuda.sh`), no el script PowerShell.
 
 ## Arquitectura
 
@@ -13,7 +20,7 @@ flowchart TB
     end
 
     subgraph app["ruteador_semantico"]
-        CFG[config.json / RUTEADOR_CONFIG]
+        CFG[config.json / config.linux-cuda.json / RUTEADOR_CONFIG]
         CSV[Test/intents.csv]
         PROMPT["Prompts/router.txt\n(clasificador LLM)"]
         LD[routes_csv.py]
@@ -61,10 +68,12 @@ Todos los llamados a Ollama usan `"think": false` (HTTP, nivel raíz del payload
 
 | Ruta | Descripción |
 |------|-------------|
-| `config.json` | Configuración por entorno (modelo, Ollama, CSV, prompts, **device CUDA** del encoder). |
-| `requirements.txt` | Dependencias Python; **PyTorch con wheels CUDA 12.4** para Windows + NVIDIA. |
+| `config.json` | Configuración Windows (`environment`: `windows-cuda`). |
+| `config.linux-cuda.json` | Configuración Ubuntu/Linux (`environment`: `linux-cuda`). |
+| `requirements.txt` | Dependencias Python; **PyTorch con wheels CUDA 12.4** (Windows y Linux + NVIDIA). |
 | `requirements-dev.txt` | Dependencias de desarrollo: `pytest`. |
-| `install-windows-cuda.ps1` | Script de PowerShell: venv + `pip install -r requirements.txt` + comprobación `torch.cuda`. |
+| `install-windows-cuda.ps1` | Script PowerShell: venv + torch CUDA + `requirements.txt` + comprobación `torch.cuda`. |
+| `install-linux-cuda.sh` | Script bash (Ubuntu): equivalente al de Windows. |
 | `conftest.py` | Configuración raíz de pytest (agrega el proyecto al path). |
 | `ruteador_semantico/` | Código de la aplicación. |
 | `ruteador_semantico/main.py` | Arranque, logging, bucle de chat, fallback LLM. |
@@ -94,22 +103,41 @@ Todos los llamados a Ollama usan `"think": false` (HTTP, nivel raíz del payload
 
 **transformers**, **tokenizers**, etc. La primera ejecución descarga el modelo de embeddings (`semantic_router.encoder.name`, por defecto `sentence-transformers/all-MiniLM-L6-v2`).
 
-**llama-cpp-python** (traído por `semantic-router[local]`): si pip no encuentra un wheel precompilado para tu versión de Python y Windows, intentará **compilar** el paquete; en ese caso hacen falta las herramientas C++ del apartado siguiente.
+**llama-cpp-python** (traído por `semantic-router[local]`): si pip no encuentra un wheel precompilado para tu versión de Python, intentará **compilar** el paquete; en ese caso hacen falta las herramientas de compilación del apartado correspondiente a tu SO.
 
-### Requisitos del sistema (Windows + CUDA)
+### Requisitos comunes (CUDA + NVIDIA)
 
-- **Windows 10/11** (64 bits).
-- **Python** 3.10 u 11 recomendado (64 bits, desde [python.org](https://www.python.org/downloads/windows/)).
-- **GPU NVIDIA** con drivers recientes; comprobar con `nvidia-smi` en PowerShell.
-- **CUDA 12.x o 13.x**: los wheels `cu124` funcionan con cualquier driver CUDA 12.x y 13.x gracias a la retrocompatibilidad de NVIDIA. No hace falta cambiar nada por tener CUDA 13.0. Para drivers más antiguos (11.x) o variantes distintas, ajustá la URL en `requirements.txt` y en el script según la [matriz oficial de PyTorch](https://pytorch.org/get-started/locally/).
-- **[Ollama para Windows](https://ollama.com/download)** con el modelo de `router_model.name`. Ollama usa la GPU NVIDIA automáticamente cuando los drivers lo permiten (comprueba con `nvidia-smi` mientras generas texto).
-- **Compilación C++ (recomendado para `pip install`):** instala [Build Tools para Visual Studio](https://visualstudio.microsoft.com/es/visual-cpp-build-tools/) (o Visual Studio completo) con la carga de trabajo **Desarrollo de escritorio con C++** (MSVC, Windows SDK, entorno para `nmake`). Así evitas errores del tipo *`nmake` no encontrado* o *`CMAKE_C_COMPILER not set`* al construir **llama-cpp-python**. Tras instalarlo, ejecuta la instalación de dependencias desde **PowerShell para desarrolladores de VS** o **Símbolo del sistema de herramientas nativas x64**, o asegúrate de que el PATH incluya el kit de compilación, para que CMake encuentre el compilador.
+- **GPU NVIDIA** con drivers recientes; comprobar con `nvidia-smi`.
+- **CUDA 12.x o 13.x**: los wheels `cu124` funcionan con drivers CUDA 12.x y 13.x (retrocompatibilidad NVIDIA). Para otras variantes, ajustá la URL en `requirements.txt` y en los scripts según la [matriz oficial de PyTorch](https://pytorch.org/get-started/locally/).
+- **Python** 3.10 u 11 recomendado (64 bits).
+- **[Ollama](https://ollama.com/download)** con el modelo de `router_model.name`. Ollama usa la GPU NVIDIA cuando los drivers lo permiten.
 
-> **Si la GPU no aparece al ejecutar (`torch.cuda.is_available()` da `False`):** lo más frecuente es que pip instaló el wheel **CPU** de PyPI en lugar del wheel CUDA. El script `install-windows-cuda.ps1` lo evita instalando torch primero con `--index-url`. Si instalaste manualmente con solo `pip install -r requirements.txt`, reinstalá torch con:
+> **Si la GPU no aparece al ejecutar (`torch.cuda.is_available()` da `False`):** lo más frecuente es que pip instaló el wheel **CPU** de PyPI. Los scripts de instalación evitan eso instalando torch primero con `--index-url`. Reinstalación manual:
+>
+> Windows (PowerShell):
 > ```powershell
 > pip install "torch>=2.3.0,<2.8.0" --index-url https://download.pytorch.org/whl/cu124
 > ```
-> La app igualmente arranca en modo CPU como fallback automático, pero sin aceleración GPU para los embeddings.
+>
+> Linux (bash):
+> ```bash
+> pip install "torch>=2.3.0,<2.8.0" --index-url https://download.pytorch.org/whl/cu124
+> ```
+>
+> La app arranca en modo CPU como fallback automático, pero sin aceleración GPU para los embeddings.
+
+### Requisitos adicionales por SO
+
+**Windows**
+
+- **Windows 10/11** (64 bits); Python desde [python.org](https://www.python.org/downloads/windows/).
+- **Compilación C++ (recomendado):** [Build Tools para Visual Studio](https://visualstudio.microsoft.com/es/visual-cpp-build-tools/) con **Desarrollo de escritorio con C++** (MSVC, Windows SDK). Ejecutá la instalación desde **PowerShell para desarrolladores de VS** si compilás **llama-cpp-python**.
+
+**Ubuntu / Linux**
+
+- **Ubuntu 22.04 o 24.04** (u otra distro con equivalentes).
+- Paquetes: `python3`, `python3-venv`, `python3-pip`, `build-essential`, `cmake`, `pkg-config` (para compilación eventual de **llama-cpp-python**).
+- Ollama: `curl -fsSL https://ollama.com/install.sh | sh` y, si aplica, `sudo systemctl enable --now ollama`.
 
 ## Instalación (Windows + NVIDIA CUDA)
 
@@ -146,18 +174,62 @@ Todos los llamados a Ollama usan `"think": false` (HTTP, nivel raíz del payload
 
    El nombre debe coincidir con `router_model.name` en `config.json`.
 
+## Instalación (Ubuntu + NVIDIA CUDA)
+
+1. Clonar o copiar el repositorio y abrir una terminal en la raíz del proyecto.
+
+2. Dependencias del sistema (una vez):
+
+   ```bash
+   sudo apt update
+   sudo apt install -y python3 python3-venv python3-pip build-essential cmake pkg-config
+   ```
+
+3. Instalación asistida (recomendado):
+
+   ```bash
+   chmod +x install-linux-cuda.sh
+   ./install-linux-cuda.sh
+   source .venv/bin/activate
+   export RUTEADOR_CONFIG="$(pwd)/config.linux-cuda.json"
+   ```
+
+4. **Instalación manual** (equivalente al script):
+
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   python -m pip install --upgrade pip
+   pip install "torch>=2.3.0,<2.8.0" --index-url https://download.pytorch.org/whl/cu124
+   pip install -r requirements.txt
+   python -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU mode')"
+   ```
+
+5. Instalar y arrancar **Ollama** (servicio o proceso en segundo plano). Comprobar API en `ollama.host` del config (por defecto `http://127.0.0.1:11434`).
+
+6. Descargar el modelo de chat:
+
+   ```bash
+   ollama pull qwen3.5:9b
+   ```
+
+   El nombre debe coincidir con `router_model.name` en `config.linux-cuda.json`.
+
 ### Solo CPU en este mismo repo
 
 Si necesitas ejecutar sin GPU, en `config.json` pon `"device": "cpu"` bajo `semantic_router.encoder` y sustituye `requirements.txt` por una instalación estándar sin `--extra-index-url` (por ejemplo solo `pip install torch --index-url https://download.pytorch.org/whl/cpu` más el resto de paquetes), o instala `torch` CPU desde la documentación de PyTorch.
 
-## Configuración (`config.json`)
+## Configuración (`config.json` / `config.linux-cuda.json`)
 
-Todas las variables que suelen cambiar entre entornos conviven en un solo archivo en la raíz. Las rutas relativas (p. ej. `intents_csv`) se resuelven **respecto al directorio donde está el `config.json`**. Los archivos con BOM UTF-8 (común al guardar desde Excel o Notepad en Windows) se leen correctamente.
+Todas las variables que suelen cambiar entre entornos conviven en un archivo JSON en la raíz. Las rutas relativas (p. ej. `intents_csv`) se resuelven **respecto al directorio donde está el archivo de config**. Los archivos con BOM UTF-8 (común al guardar desde Excel o Notepad en Windows) se leen correctamente.
+
+- **Windows:** `config.json` (por defecto si no definís `RUTEADOR_CONFIG`).
+- **Linux:** `config.linux-cuda.json` vía `RUTEADOR_CONFIG` o `--config`.
 
 | Clave | Descripción |
 |-------|-------------|
 | `branch` | Etiqueta de rama o despliegue (solo metadato; se muestra al listar rutas). |
-| `environment` | Nombre del entorno (por defecto `windows-cuda`). |
+| `environment` | Nombre del entorno (`windows-cuda` o `linux-cuda`). |
 | `intents_csv` | Ruta al CSV de intenciones (relativa al `config.json` o absoluta). |
 | `ollama.host` | URL base del API de Ollama (sin barra final recomendable). |
 | `ollama.pull_on_startup` | Si es `true`, intenta `pull` del modelo al arrancar. |
@@ -180,7 +252,7 @@ Todas las variables que suelen cambiar entre entornos conviven en un solo archiv
 ### Otro archivo de configuración
 
 - Variable de entorno **`RUTEADOR_CONFIG`**: ruta absoluta o relativa a otro `config.json`.
-- Línea de comandos: `python -m ruteador_semantico --config ruta\al\config.json`.
+- Línea de comandos: `python -m ruteador_semantico --config ruta/al/config.json` (en Windows también podés usar barras invertidas entre comillas).
 
 ## Formato del CSV de intenciones
 
@@ -192,20 +264,44 @@ Todas las variables que suelen cambiar entre entornos conviven en un solo archiv
 
 Desde la raíz del proyecto (donde existe la carpeta `ruteador_semantico`):
 
+**Windows (PowerShell):**
+
 ```powershell
+.\.venv\Scripts\Activate.ps1
+python -m ruteador_semantico
+```
+
+**Linux (bash):**
+
+```bash
+source .venv/bin/activate
+export RUTEADOR_CONFIG="$(pwd)/config.linux-cuda.json"
 python -m ruteador_semantico
 ```
 
 Con configuración explícita:
 
 ```powershell
+# Windows
 python -m ruteador_semantico --config "D:\Dev\Ruteador Inten\config.json"
 ```
 
-Al arrancar, los mensajes de diagnóstico (ruta del config, estado CUDA, descarga del modelo) se emiten por **stderr** mediante el módulo `logging`. El nivel de detalle se controla con la variable de entorno `RUTEADOR_LOG_LEVEL` (valores: `DEBUG`, `INFO`, `WARNING`, `ERROR`; por defecto `INFO`):
+```bash
+# Linux
+python -m ruteador_semantico --config "$(pwd)/config.linux-cuda.json"
+```
+
+Al arrancar, los mensajes de diagnóstico (ruta del config, estado CUDA, descarga del modelo) se emiten por **stderr** mediante el módulo `logging`. El nivel de detalle se controla con `RUTEADOR_LOG_LEVEL` (`DEBUG`, `INFO`, `WARNING`, `ERROR`; por defecto `INFO`):
 
 ```powershell
+# Windows
 $env:RUTEADOR_LOG_LEVEL = "DEBUG"
+python -m ruteador_semantico
+```
+
+```bash
+# Linux
+export RUTEADOR_LOG_LEVEL=DEBUG
 python -m ruteador_semantico
 ```
 
@@ -214,6 +310,13 @@ Luego se imprime en **stdout** el **listado de rutas** con sus ejemplos y arranc
 ### Tests unitarios
 
 ```powershell
+# Windows
+pip install -r requirements-dev.txt
+pytest tests/ -v
+```
+
+```bash
+# Linux
 pip install -r requirements-dev.txt
 pytest tests/ -v
 ```
